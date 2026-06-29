@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>사진 바로 보내기</title>
+
+<!-- WebRTC 연결(시그널링)과 QR 생성을 위한 라이브러리 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<style>
+  :root{
+    --bg:#FBF6F7; --card:#FFFFFF; --ink:#3B333B; --muted:#A99CA4;
+    --rose:#E0708A; --rose-deep:#C8546F; --rose-soft:#FBE6EC; --line:#F1E7EB;
+    --ok:#4FB89A; --shadow:0 10px 40px rgba(190,120,145,.13);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;}
+  body{
+    background:
+      radial-gradient(120% 80% at 50% -10%, #FFF1F5 0%, rgba(255,241,245,0) 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Segoe UI",
+      Roboto,"Helvetica Neue","Noto Sans KR",sans-serif;
+    min-height:100dvh; line-height:1.55;
+    display:flex; flex-direction:column; align-items:center;
+    padding:28px 18px 48px;
+  }
+  .wrap{width:100%; max-width:460px;}
+
+  header{text-align:center; margin-bottom:22px;}
+  .mark{
+    font-size:13px; letter-spacing:.32em; text-transform:uppercase;
+    color:var(--rose); font-weight:700;
+  }
+  h1{font-size:26px; font-weight:800; margin:6px 0 4px; letter-spacing:-.01em;}
+  .sub{color:var(--muted); font-size:14px; margin:0;}
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:22px;
+    box-shadow:var(--shadow); padding:22px; margin-bottom:16px;
+  }
+
+  /* 연결 상태 표시 */
+  .status{display:flex; align-items:center; gap:10px; margin-bottom:18px;}
+  .ring{
+    width:14px; height:14px; border-radius:50%;
+    background:var(--rose-soft); position:relative; flex:0 0 auto;
+  }
+  .ring::after{
+    content:""; position:absolute; inset:0; border-radius:50%;
+    border:2px solid var(--rose); opacity:.55;
+    animation:breathe 1.8s ease-in-out infinite;
+  }
+  .ring.on{background:var(--ok);}
+  .ring.on::after{border-color:var(--ok); animation:none; opacity:0;}
+  @keyframes breathe{
+    0%,100%{transform:scale(1); opacity:.55;}
+    50%{transform:scale(2.0); opacity:0;}
+  }
+  .status .txt{font-size:14px; font-weight:600;}
+  .status .txt small{display:block; color:var(--muted); font-weight:500; font-size:12px;}
+
+  /* 내 코드 / QR */
+  .code-box{text-align:center;}
+  .code-label{font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .code{
+    font-size:30px; font-weight:800; letter-spacing:.18em;
+    color:var(--rose-deep); font-variant-numeric:tabular-nums; margin-bottom:14px;
+  }
+  #qr{display:inline-block; padding:12px; background:#fff; border-radius:16px;
+    border:1px solid var(--line);}
+  #qr img{display:block; border-radius:6px;}
+  .hint{font-size:13px; color:var(--muted); margin-top:14px;}
+
+  /* 코드 직접 입력 */
+  .join-row{display:flex; gap:8px; margin-top:6px;}
+  input[type=text]{
+    flex:1; min-width:0; font-size:16px; padding:13px 14px; border-radius:14px;
+    border:1px solid var(--line); background:#fff; color:var(--ink);
+    letter-spacing:.1em; text-transform:uppercase; outline:none;
+  }
+  input[type=text]:focus{border-color:var(--rose);}
+  button{
+    font-family:inherit; font-size:15px; font-weight:700; cursor:pointer;
+    border:none; border-radius:14px; padding:13px 18px;
+    background:var(--rose); color:#fff; transition:transform .08s ease, background .15s;
+  }
+  button:hover{background:var(--rose-deep);}
+  button:active{transform:scale(.97);}
+  button:disabled{background:#EBDDE2; color:#C2B2B9; cursor:not-allowed;}
+
+  /* 보내기 영역 */
+  .drop{
+    border:2px dashed var(--rose-soft); border-radius:18px; padding:30px 18px;
+    text-align:center; color:var(--muted); transition:border-color .15s, background .15s;
+    cursor:pointer;
+  }
+  .drop.hot{border-color:var(--rose); background:var(--rose-soft);}
+  .drop .big{font-size:34px; line-height:1; margin-bottom:8px;}
+  .drop .t{font-size:15px; font-weight:600; color:var(--ink);}
+  .drop .s{font-size:12.5px; margin-top:3px;}
+
+  .section-title{font-size:13px; font-weight:700; color:var(--muted);
+    letter-spacing:.04em; margin:0 2px 10px;}
+
+  /* 받은 이미지 목록 */
+  .item{
+    display:flex; gap:12px; align-items:center; padding:10px;
+    border:1px solid var(--line); border-radius:16px; margin-bottom:10px; background:#fff;
+  }
+  .item img{width:56px; height:56px; object-fit:cover; border-radius:11px; flex:0 0 auto;}
+  .item .meta{flex:1; min-width:0;}
+  .item .nm{font-size:14px; font-weight:600; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;}
+  .item .sz{font-size:12px; color:var(--muted);}
+  .item a.save{
+    flex:0 0 auto; text-decoration:none; background:var(--rose); color:#fff;
+    font-weight:700; font-size:13px; padding:9px 14px; border-radius:12px;
+  }
+  .item a.save:active{transform:scale(.97);}
+
+  .empty{color:var(--muted); font-size:13.5px; text-align:center; padding:6px 0;}
+  .toast{
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; font-size:13px; font-weight:600;
+    padding:11px 18px; border-radius:999px; opacity:0; pointer-events:none;
+    transition:opacity .2s, transform .2s; z-index:50;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .hidden{display:none !important;}
+  .foot{text-align:center; font-size:12px; color:var(--muted); margin-top:6px;}
+
+  @media (prefers-reduced-motion: reduce){
+    .ring::after{animation:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="mark">P2P · 저장 없음</div>
+    <h1>사진 바로 보내기</h1>
+    <p class="sub">두 기기를 연결하고 사진을 바로 주고받아요</p>
+  </header>
+
+  <!-- 연결 카드 -->
+  <div class="card">
+    <div class="status">
+      <div class="ring" id="ring"></div>
+      <div class="txt" id="statusTxt">연결 준비 중…<small>잠시만요</small></div>
+    </div>
+
+    <!-- 연결 전: 내 코드 + QR + 코드입력 -->
+    <div id="connectPanel">
+      <div class="code-box">
+        <div class="code-label">이 기기 코드</div>
+        <div class="code" id="myCode">····</div>
+        <div id="qr"></div>
+        <div class="hint">상대 기기에서 이 <b>QR을 찍거나</b> 코드를 입력하면 연결돼요</div>
+      </div>
+
+      <div style="margin-top:18px;">
+        <div class="code-label" style="text-align:left; margin-left:2px;">상대 코드로 접속</div>
+        <div class="join-row">
+          <input type="text" id="joinInput" placeholder="예: 7K3F" maxlength="8" autocomplete="off" />
+          <button id="joinBtn">연결</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 연결 후: 새 연결 버튼 -->
+    <div id="connectedPanel" class="hidden">
+      <button id="resetBtn" style="width:100%; background:#F4EAEE; color:var(--rose-deep);">다른 기기와 새로 연결</button>
+    </div>
+  </div>
+
+  <!-- 보내기 카드 (연결되면 활성) -->
+  <div class="card" id="sendCard">
+    <div class="section-title">보내기</div>
+    <label class="drop" id="drop" for="fileInput">
+      <div class="big">🖼️</div>
+      <div class="t">사진 선택 또는 끌어다 놓기</div>
+      <div class="s">연결되면 바로 전송돼요 · 여러 장 가능</div>
+    </label>
+    <input type="file" id="fileInput" accept="image/*" multiple class="hidden" />
+  </div>
+
+  <!-- 받은 사진 카드 -->
+  <div class="card">
+    <div class="section-title">받은 사진</div>
+    <div id="recvList"><div class="empty">아직 받은 사진이 없어요</div></div>
+    <div class="foot">사진을 받으면 여기에 표시돼요 · 아이폰은 사진을 길게 눌러 저장하세요</div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---- 요소 ----
+  const $ = id => document.getElementById(id);
+  const ring=$('ring'), statusTxt=$('statusTxt');
+  const connectPanel=$('connectPanel'), connectedPanel=$('connectedPanel');
+  const myCodeEl=$('myCode'), qrEl=$('qr');
+  const joinInput=$('joinInput'), joinBtn=$('joinBtn'), resetBtn=$('resetBtn');
+  const drop=$('drop'), fileInput=$('fileInput');
+  const recvList=$('recvList'), toastEl=$('toast');
+
+  let peer=null, conn=null, myCode='';
+
+  // ---- 유틸 ----
+  function genCode(){ // 사람이 입력하기 쉬운 4자리 코드 (혼동 문자 제외)
+    const ch='ABCDEFGHJKLMNPRSTUVWXYZ23456789';
+    let s=''; for(let i=0;i<4;i++) s+=ch[Math.floor(Math.random()*ch.length)];
+    return s;
+  }
+  function fmtSize(b){
+    if(b<1024) return b+' B';
+    if(b<1048576) return (b/1024).toFixed(0)+' KB';
+    return (b/1048576).toFixed(1)+' MB';
+  }
+  let toastTimer;
+  function toast(msg){
+    toastEl.textContent=msg; toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer=setTimeout(()=>toastEl.classList.remove('show'),2200);
+  }
+  function setStatus(state, main, sub){
+    ring.classList.toggle('on', state==='on');
+    statusTxt.innerHTML = main + (sub? '<small>'+sub+'</small>' : '');
+  }
+
+  // ---- Peer 초기화 (내 코드로 등록) ----
+  function initPeer(){
+    myCode = genCode();
+    peer = new Peer(myCode, { debug:1 });
+
+    peer.on('open', id=>{
+      myCode = id;
+      myCodeEl.textContent = id;
+      drawQR(id);
+      setStatus('off','연결 대기 중','상대 접속을 기다려요');
+      // URL에 ?join=코드 가 있으면 자동 접속
+      const target = new URLSearchParams(location.search).get('join');
+      if(target && target.toUpperCase()!==id){ connectTo(target.toUpperCase()); }
+    });
+
+    // 상대가 나에게 접속해 옴
+    peer.on('connection', c=>{ wireConn(c); });
+
+    peer.on('error', err=>{
+      if(err.type==='unavailable-id'){
+        // 코드 충돌 → 다시 시도
+        peer.destroy(); initPeer(); return;
+      }
+      if(err.type==='peer-unavailable'){
+        toast('그 코드의 기기를 찾을 수 없어요');
+        setStatus('off','연결 대기 중','상대 접속을 기다려요');
+        joinBtn.disabled=false; joinBtn.textContent='연결';
+        return;
+      }
+      console.warn(err);
+      toast('연결 오류: '+err.type);
+    });
+  }
+
+  function drawQR(code){
+    qrEl.innerHTML='';
+    const url = location.origin + location.pathname + '?join=' + code;
+    new QRCode(qrEl, {
+      text:url, width:168, height:168,
+      colorDark:'#3B333B', colorLight:'#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }
+
+  // ---- 상대에게 접속 ----
+  function connectTo(code){
+    if(!peer || !code) return;
+    setStatus('off','연결 중…','상대 기기를 찾는 중');
+    joinBtn.disabled=true; joinBtn.textContent='연결 중…';
+    const c = peer.connect(code, { reliable:true });
+    wireConn(c);
+  }
+
+  // ---- 연결 핸들러 (양쪽 공통) ----
+  function wireConn(c){
+    // 기존 연결이 있으면 닫고 교체
+    if(conn && conn.open){ try{conn.close();}catch(e){} }
+    conn = c;
+
+    c.on('open', ()=>{
+      setStatus('on','연결됨','상대 코드 '+ c.peer);
+      connectPanel.classList.add('hidden');
+      connectedPanel.classList.remove('hidden');
+      drop.classList.remove('disabled');
+      joinBtn.disabled=false; joinBtn.textContent='연결';
+      toast('연결됐어요 ✓');
+    });
+
+    c.on('data', d=>{
+      if(!d || !d.kind) return;
+      if(d.kind==='img'){
+        receiveImage(d);
+        // 보낸 쪽에 전달 완료 알림
+        try{ c.send({kind:'ack', name:d.name}); }catch(e){}
+      } else if(d.kind==='ack'){
+        toast('전달됨 ✓ '+ (d.name||''));
+      }
+    });
+
+    c.on('close', ()=>{ onDisconnect('상대가 연결을 끊었어요'); });
+    c.on('error', ()=>{ onDisconnect('연결이 끊겼어요'); });
+  }
+
+  function onDisconnect(msg){
+    setStatus('off','연결 대기 중','상대 접속을 기다려요');
+    connectPanel.classList.remove('hidden');
+    connectedPanel.classList.add('hidden');
+    if(msg) toast(msg);
+  }
+
+  // ---- 보내기 ----
+  async function sendFiles(files){
+    if(!conn || !conn.open){ toast('먼저 기기를 연결하세요'); return; }
+    for(const f of files){
+      if(!f.type.startsWith('image/')){ toast('이미지 파일만 보낼 수 있어요'); continue; }
+      try{
+        const buf = await f.arrayBuffer();
+        conn.send({ kind:'img', name:f.name, mime:f.type, size:f.size, data:buf });
+        toast('보내는 중… '+f.name);
+      }catch(e){ toast('전송 실패: '+f.name); }
+    }
+  }
+
+  // ---- 받기 ----
+  function receiveImage(d){
+    const blob = new Blob([d.data], { type:d.mime||'image/jpeg' });
+    const url = URL.createObjectURL(blob);
+
+    // 비어있음 표시 제거
+    const emptyEl = recvList.querySelector('.empty');
+    if(emptyEl) emptyEl.remove();
+
+    const item = document.createElement('div');
+    item.className='item';
+
+    const img = document.createElement('img');
+    img.src=url; img.alt=d.name||'received image';
+
+    const meta = document.createElement('div');
+    meta.className='meta';
+    const nm=document.createElement('div'); nm.className='nm'; nm.textContent=d.name||'image.jpg';
+    const sz=document.createElement('div'); sz.className='sz'; sz.textContent=fmtSize(d.size||blob.size);
+    meta.appendChild(nm); meta.appendChild(sz);
+
+    const a=document.createElement('a');
+    a.className='save'; a.href=url; a.download=d.name||'image.jpg'; a.textContent='저장';
+
+    item.appendChild(img); item.appendChild(meta); item.appendChild(a);
+    recvList.prepend(item);
+    toast('사진 도착 ✓');
+  }
+
+  // ---- 이벤트 ----
+  joinBtn.addEventListener('click', ()=>{
+    const v=(joinInput.value||'').trim().toUpperCase();
+    if(v) connectTo(v);
+  });
+  joinInput.addEventListener('keydown', e=>{ if(e.key==='Enter') joinBtn.click(); });
+
+  resetBtn.addEventListener('click', ()=>{
+    if(conn){ try{conn.close();}catch(e){} }
+    onDisconnect('');
+  });
+
+  fileInput.addEventListener('change', e=>{ if(e.target.files.length) sendFiles(e.target.files); fileInput.value=''; });
+
+  ['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev, e=>{
+    e.preventDefault(); drop.classList.add('hot');
+  }));
+  ['dragleave','drop'].forEach(ev=> drop.addEventListener(ev, e=>{
+    e.preventDefault(); drop.classList.remove('hot');
+  }));
+  drop.addEventListener('drop', e=>{
+    if(e.dataTransfer.files.length) sendFiles(e.dataTransfer.files);
+  });
+
+  // ---- 시작 ----
+  if(typeof Peer==='undefined'){
+    setStatus('off','연결 모듈을 불러오지 못했어요','인터넷 연결을 확인하세요');
+  }else{
+    setStatus('off','연결 준비 중…','코드 발급 중');
+    initPeer();
+  }
+})();
+</script>
+</body>
+</html>
